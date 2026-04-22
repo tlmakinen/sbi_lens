@@ -9,16 +9,12 @@ import jax_cosmo as jc
 import numpy as np
 import numpyro
 import numpyro.distributions as dist
-import tensorflow_probability as tfp
 from lenstools import ConvergenceMap
 from numpyro import sample
 from numpyro.handlers import condition, reparam, seed, trace
 from numpyro.infer.reparam import LocScaleReparam, TransformReparam
 
 from sbi_lens.simulator.redshift import subdivide
-
-tfp = tfp.substrates.jax
-tfd = tfp.distributions
 
 np.complex = complex
 np.float = float

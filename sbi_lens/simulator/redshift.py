@@ -3,9 +3,75 @@ import jax.numpy as jnp
 import jax_cosmo as jc
 from jax.tree_util import register_pytree_node_class
 from jax_cosmo.scipy.integrate import simps
-from tensorflow_probability.substrates.jax.math import find_root_chandrupatla
 
 from sbi_lens.simulator.romberg import romb
+
+
+@register_pytree_node_class
+class RootResult:
+    """Container matching the minimal TFP root-finder API."""
+
+    def __init__(self, estimated_root):
+        self.estimated_root = estimated_root
+
+    def tree_flatten(self):
+        return (self.estimated_root,), None
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        del aux_data
+        return cls(children[0])
+
+
+def find_root_chandrupatla(
+    objective_fn,
+    low,
+    high,
+    position_tolerance=1e-8,
+    value_tolerance=1e-8,
+    max_iterations=128,
+):
+    """Standalone JAX root finder with a TFP-like return shape.
+
+    This implementation keeps a bracket [a, b] around a sign change and uses
+    a secant proposal with bisection fallback. It is enough for the simulator
+    use case and removes the tensorflow_probability dependency.
+    """
+    a = jnp.asarray(low)
+    b = jnp.asarray(high)
+    fa = objective_fn(a)
+    fb = objective_fn(b)
+
+    same_sign = jnp.signbit(fa) == jnp.signbit(fb)
+    if bool(same_sign):
+        raise ValueError("Root is not bracketed: objective_fn(low) and objective_fn(high) have the same sign.")
+
+    root = 0.5 * (a + b)
+    froot = objective_fn(root)
+    converged = (jnp.abs(froot) <= value_tolerance) | (jnp.abs(b - a) <= position_tolerance)
+
+    for _ in range(max_iterations):
+        if bool(converged):
+            break
+
+        denom = fb - fa
+        safe = jnp.abs(denom) > jnp.finfo(denom.dtype).eps
+        secant = a - fa * (b - a) / jnp.where(safe, denom, 1.0)
+        use_bisection = (~safe) | (secant <= jnp.minimum(a, b)) | (secant >= jnp.maximum(a, b))
+        c = jnp.where(use_bisection, 0.5 * (a + b), secant)
+        fc = objective_fn(c)
+
+        left_has_root = jnp.signbit(fa) != jnp.signbit(fc)
+        b = jnp.where(left_has_root, c, b)
+        fb = jnp.where(left_has_root, fc, fb)
+        a = jnp.where(left_has_root, a, c)
+        fa = jnp.where(left_has_root, fa, fc)
+
+        root = 0.5 * (a + b)
+        froot = objective_fn(root)
+        converged = (jnp.abs(froot) <= value_tolerance) | (jnp.abs(b - a) <= position_tolerance)
+
+    return RootResult(estimated_root=root)
 
 
 @register_pytree_node_class
